@@ -23,7 +23,9 @@ mfxStatus Initialize(mfxVersion ver, mfxSession *pSession, mfxFrameAllocator *pm
 
 	obs_video_info ovi;
 	obs_get_video_info(&ovi);
-	mfxU32 adapter_idx = ovi.adapter;
+	mfxU32 adapter_idx = (qsv_adapter_override >= 0 && (size_t)qsv_adapter_override < adapter_count)
+				? (mfxU32)qsv_adapter_override
+				: ovi.adapter;
 	mfxU32 idx_adjustment = 0;
 
 	// Select current adapter - will be iGPU if exists due to adapter reordering

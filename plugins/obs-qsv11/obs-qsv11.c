@@ -108,6 +108,12 @@ static pthread_mutex_t g_QsvLock = PTHREAD_MUTEX_INITIALIZER;
 static unsigned short g_verMajor;
 static unsigned short g_verMinor;
 
+static int get_qsv_adapter_selection(obs_data_t *settings)
+{
+	int val = (int)obs_data_get_int(settings, "adapter");
+	return (val >= 0 && (size_t)val < adapter_count) ? val : -1;
+}
+
 static const char *obs_qsv_getname_v1(void *type_data)
 {
 	UNUSED_PARAMETER(type_data);
@@ -180,6 +186,7 @@ static void obs_qsv_defaults(obs_data_t *settings, int ver, enum qsv_codec codec
 	obs_data_set_default_string(settings, "latency", "normal");
 	obs_data_set_default_int(settings, "bframes", 3);
 	obs_data_set_default_bool(settings, "repeat_headers", false);
+	obs_data_set_default_int(settings, "adapter", -1);
 }
 
 static void obs_qsv_defaults_h264_v1(obs_data_t *settings)
@@ -407,6 +414,16 @@ static obs_properties_t *obs_qsv_props(enum qsv_codec codec, void *unused, int v
 	obs_property_set_long_description(prop, obs_module_text("Latency.ToolTip"));
 
 	obs_properties_add_int(props, "bframes", TEXT_BFRAMES, 0, 3, 1);
+
+	prop = obs_properties_add_list(props, "adapter", "GPU", OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(prop, "Default (rendering GPU)", -1);
+	for (size_t i = 0; i < adapter_count; i++) {
+		if (!adapters[i].is_intel)
+			continue;
+		char name[64];
+		snprintf(name, sizeof(name), "Intel GPU %zu", i);
+		obs_property_list_add_int(prop, name, (int)i);
+	}
 
 	return props;
 }
@@ -787,6 +804,7 @@ static void *obs_qsv_create(enum qsv_codec codec, obs_data_t *settings, obs_enco
 	}
 
 	if (update_settings(obsqsv, settings)) {
+		qsv_adapter_override = get_qsv_adapter_selection(settings);
 		pthread_mutex_lock(&g_QsvLock);
 		obsqsv->context = qsv_encoder_open(&obsqsv->params, codec, useTexAlloc);
 		pthread_mutex_unlock(&g_QsvLock);
@@ -839,12 +857,20 @@ static void *obs_qsv_create_tex(enum qsv_codec codec, obs_data_t *settings, obs_
 	struct obs_video_info ovi;
 	obs_get_video_info(&ovi);
 
-	if (!adapters[ovi.adapter].is_intel) {
+	int sel = get_qsv_adapter_selection(settings);
+	size_t adapter = (sel >= 0) ? (size_t)sel : ovi.adapter;
+
+	if (sel >= 0 && (size_t)sel != ovi.adapter) {
+		blog(LOG_INFO, ">>> encoding on different GPU than rendering, fall back to non-texture sharing qsv encoder");
+		return obs_encoder_create_rerouted(encoder, (const char *)fallback_id);
+	}
+
+	if (!adapters[adapter].is_intel) {
 		blog(LOG_INFO, ">>> app not on intel GPU, fall back to old qsv encoder");
 		return obs_encoder_create_rerouted(encoder, (const char *)fallback_id);
 	}
 
-	if (codec == QSV_CODEC_AV1 && !adapters[ovi.adapter].supports_av1) {
+	if (codec == QSV_CODEC_AV1 && !adapters[adapter].supports_av1) {
 		blog(LOG_INFO, ">>> cap on different device, fall back to non-texture sharing AV1 qsv encoder");
 		return obs_encoder_create_rerouted(encoder, (const char *)fallback_id);
 	}

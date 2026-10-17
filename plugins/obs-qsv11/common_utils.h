@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdio.h>
+#include <stdint.h>
 
 // Most of this file shouldnt be accessed from C.
 #ifdef __cplusplus
@@ -24,6 +25,7 @@ struct adapter_info {
 extern struct adapter_info adapters[MAX_ADAPTERS];
 extern size_t adapter_count;
 extern size_t adapter_index;
+extern int32_t qsv_adapter_override;
 
 void util_cpuid(int cpuinfo[4], int flags);
 void check_adapters(struct adapter_info *adapters, size_t *adapter_count);
